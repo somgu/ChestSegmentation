@@ -1,0 +1,6 @@
+*.xml
+*.h5
+*.dcm
+*.png
+
+.idea/
