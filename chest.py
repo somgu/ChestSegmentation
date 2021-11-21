@@ -1,39 +1,13 @@
-"""
-Mask R-CNN
-Train on the toy Balloon dataset and implement color splash effect.
-
-Copyright (c) 2018 Matterport, Inc.
-Licensed under the MIT License (see LICENSE for details)
-Written by Waleed Abdulla
-
-------------------------------------------------------------
-
-Usage: import the module (see Jupyter notebooks for examples), or run from
-       the command line as such:
-
-    # Train a new model starting from pre-trained COCO weights
-    python3 balloon.py train --dataset=/path/to/balloon/dataset --weights=coco
-
-    # Resume training a model that you had trained earlier
-    python3 balloon.py train --dataset=/path/to/balloon/dataset --weights=last
-
-    # Train a new model starting from ImageNet weights
-    python3 balloon.py train --dataset=/path/to/balloon/dataset --weights=imagenet
-
-    # Apply color splash to an image
-    python3 balloon.py splash --weights=/path/to/weights/file.h5 --image=<URL or path to file>
-
-    # Apply color splash to video using the last weights you trained
-    python3 balloon.py splash --weights=last --video=<URL or path to file>
-"""
 
 import os
 import sys
 import json
 import datetime
 import numpy as np
+from skimage.io import imread
 import skimage.draw
-
+import pydicom
+from PIL import Image
 # Root directory of the project
 ROOT_DIR = os.path.abspath("../../")
 
@@ -41,6 +15,7 @@ ROOT_DIR = os.path.abspath("../../")
 sys.path.append(ROOT_DIR)  # To find local version of the library
 from mrcnn.config import Config
 from mrcnn import model as modellib, utils
+from Dataset import Dataset
 
 # Path to trained weights file
 COCO_WEIGHTS_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
@@ -54,19 +29,19 @@ DEFAULT_LOGS_DIR = os.path.join(ROOT_DIR, "logs")
 ############################################################
 
 
-class BalloonConfig(Config):
-    """Configuration for training on the toy  dataset.
+class ChestConfig(Config):
+    """Configuration for training on the chest dataset.
     Derives from the base Config class and overrides some values.
     """
     # Give the configuration a recognizable name
-    NAME = "balloon"
+    NAME = "chest"
 
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
     IMAGES_PER_GPU = 2
 
     # Number of classes (including background)
-    NUM_CLASSES = 1 + 1  # Background + balloon
+    NUM_CLASSES = 1 + 2  # Background + muscle + fat
 
     # Number of training steps per epoch
     STEPS_PER_EPOCH = 100
@@ -79,67 +54,50 @@ class BalloonConfig(Config):
 #  Dataset
 ############################################################
 
-class BalloonDataset(utils.Dataset):
+class ChestDataset(utils.Dataset):
 
-    def load_balloon(self, dataset_dir, subset):
-        """Load a subset of the Balloon dataset.
+    def load_chest(self, dataset_dir, subset):
+        """Load a subset of the Chest dataset.
         dataset_dir: Root directory of the dataset.
         subset: Subset to load: train or val
         """
         # Add classes. We have only one class to add.
-        self.add_class("balloon", 1, "balloon")
+        self.add_class("object", 1, "visceral fat")
+        self.add_class("object", 2, "muscle")
+        self.add_class("object", 3, "subcutaneous fat")
 
         # Train or validation dataset?
         assert subset in ["train", "val"]
         dataset_dir = os.path.join(dataset_dir, subset)
 
-        # Load annotations
-        # VGG Image Annotator (up to version 1.6) saves each image in the form:
-        # { 'filename': '28503151_5b5b7ec140_b.jpg',
-        #   'regions': {
-        #       '0': {
-        #           'region_attributes': {},
-        #           'shape_attributes': {
-        #               'all_points_x': [...],
-        #               'all_points_y': [...],
-        #               'name': 'polygon'}},
-        #       ... more regions ...
-        #   },
-        #   'size': 100202
-        # }
-        # We mostly care about the x and y coordinates of each region
-        # Note: In VIA 2.0, regions was changed from a dict to a list.
-        annotations = json.load(open(os.path.join(dataset_dir, "via_region_data.json")))
-        annotations = list(annotations.values())  # don't need the dict keys
-
-        # The VIA tool saves images in the JSON even if they don't have any
-        # annotations. Skip unannotated images.
-        annotations = [a for a in annotations if a['regions']]
-
         # Add images
-        for a in annotations:
-            # Get the x, y coordinaets of points of the polygons that make up
-            # the outline of each object instance. These are stores in the
-            # shape_attributes (see json format above)
-            # The if condition is needed to support VIA versions 1.x and 2.x.
-            if type(a['regions']) is dict:
-                polygons = [r['shape_attributes'] for r in a['regions'].values()]
-            else:
-                polygons = [r['shape_attributes'] for r in a['regions']] 
-
-            # load_mask() needs the image size to convert polygons to masks.
-            # Unfortunately, VIA doesn't include it in JSON, so we must read
-            # the image. This is only managable since the dataset is tiny.
-            image_path = os.path.join(dataset_dir, a['filename'])
-            image = skimage.io.imread(image_path)
+        dataset = Dataset("ChestCT_GT/ChestCT_DCM", "ChestCT_GT/ChestCT_GT_Label")
+        file_name = dataset.dcm_list
+        for idx, a in enumerate(dataset.dcm_list):
+            polygons = []
+            objects = [s['region_attributes'] for s in a ['regions']]
+            num_ids = []
+            for n in objects:
+                try:
+                    if n['object'] == 'muscle':
+                        num_ids.append(1)
+                    elif n['object'] == 'fat':
+                        num_ids.append(2)
+                except:
+                    pass
+            image_path = os.path.join(dataset_dir, file_name[idx])
+            image = pydicom.dcmread(image_path).pixel_array
             height, width = image.shape[:2]
 
             self.add_image(
-                "balloon",
-                image_id=a['filename'],  # use file name as a unique image id
+                "object",
+                image_id=file_name[idx],  # use file name as a unique image id
                 path=image_path,
-                width=width, height=height,
-                polygons=polygons)
+                width=width,
+                height=height,
+                polygons=polygons,
+                num_ids=num_ids,
+            )
 
     def load_mask(self, image_id):
         """Generate instance masks for an image.
@@ -150,7 +108,7 @@ class BalloonDataset(utils.Dataset):
         """
         # If not a balloon dataset image, delegate to parent class.
         image_info = self.image_info[image_id]
-        if image_info["source"] != "balloon":
+        if image_info["source"] != "object":
             return super(self.__class__, self).load_mask(image_id)
 
         # Convert polygons to a bitmap mask of shape
