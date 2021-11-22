@@ -6,6 +6,7 @@ import datetime
 import numpy as np
 from skimage.io import imread
 import skimage.draw
+from Dataset import Dataset
 import pydicom
 from PIL import Image
 # Root directory of the project
@@ -71,7 +72,8 @@ class ChestDataset(utils.Dataset):
         dataset_dir = os.path.join(dataset_dir, subset)
 
         # Add images
-        dataset = Dataset("ChestCT_GT/ChestCT_DCM", "ChestCT_GT/ChestCT_GT_Label")
+        dataset = Dataset(dataset_dir)
+
         file_name = dataset.dcm_list
         for idx, a in enumerate(dataset.dcm_list):
             polygons = []
