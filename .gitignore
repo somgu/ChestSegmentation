@@ -4,3 +4,5 @@
 *.png
 
 .idea/
+__pycache__/
+.git/
