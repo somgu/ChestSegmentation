@@ -9,14 +9,17 @@ import skimage.draw
 from Dataset import Dataset
 import pydicom
 from PIL import Image
+import matplotlib.pyplot as plt
+from mrcnn.config import Config
+from mrcnn import model as modellib, utils
+from Dataset import Dataset
+import labeling
+
 # Root directory of the project
 ROOT_DIR = os.path.abspath("../../")
 
 # Import Mask RCNN
 sys.path.append(ROOT_DIR)  # To find local version of the library
-from mrcnn.config import Config
-from mrcnn import model as modellib, utils
-from Dataset import Dataset
 
 # Path to trained weights file
 COCO_WEIGHTS_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
@@ -42,7 +45,7 @@ class ChestConfig(Config):
     IMAGES_PER_GPU = 2
 
     # Number of classes (including background)
-    NUM_CLASSES = 1 + 2  # Background + muscle + fat
+    NUM_CLASSES = 1 + 3  # Background + muscle + fat
 
     # Number of training steps per epoch
     STEPS_PER_EPOCH = 100
@@ -74,7 +77,8 @@ class ChestDataset(utils.Dataset):
         # Add images
         dataset = Dataset(dataset_dir)
 
-        file_name = dataset.dcm_list
+        dcm_list = dataset.dcm_list
+        gt_list = dataset.gt_list
         for idx, a in enumerate(dataset.dcm_list):
             polygons = []
             objects = [s['region_attributes'] for s in a ['regions']]
