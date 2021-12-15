@@ -14,8 +14,17 @@ class Dataset:
 
         # dcm, ground truth 이미지 파일명 읽어오기. 읽어오면서 파일을 정렬
         data_list = natsort.natsorted(os.listdir(dataset_path))
-        self.dcm_path_list = glob.glob(os.path.join(dataset_path, '*.dcm'))
-        self.mask_path_list = glob.glob(os.path.join(dataset_path, '*.png'))
+        self.dcm_path_list = data_list[0::2]
+        self.mask_path_list = data_list[1::2]
+
+        self.dcm_path_list = natsort.natsorted(self.dcm_path_list)
+        self.mask_path_list = natsort.natsorted(self.mask_path_list)
+
+        for idx, dcm in enumerate(self.dcm_path_list):
+            self.dcm_path_list[idx] = os.path.join(dataset_path, dcm)
+
+        for idx, mask in enumerate(self.mask_path_list):
+            self.mask_path_list[idx] = os.path.join(dataset_path, mask)
 
         for dcm in self.dcm_path_list:
             self.dicoms.append(pydicom.dcmread(dcm))
